@@ -1,7 +1,7 @@
 import streamlit as st
 from config import load_user_settings, save_user_settings
 from data_fetcher import fetch_price_and_trend
-from strategy import calculate_investment_percentage
+from strategy_buy_the_dip import calculate_investment_percentage as dip_strategy
 from portfolio import log_investment, get_portfolio_df, already_invested_today
 from datetime import datetime
 import pandas as pd
@@ -11,35 +11,37 @@ import yfinance as yf
 st.set_page_config(layout="wide")
 st.title("Smart Investment Tracker")
 
+# Load settings and initialize session state
 settings = load_user_settings()
 if "settings_loaded" not in st.session_state:
     for key, val in settings.items():
         st.session_state[key] = val
     st.session_state.settings_loaded = True
 
+# Sidebar for settings
 st.sidebar.header("User Settings")
 ticker_input = st.sidebar.text_input("Enter ETF Ticker (e.g. VSP.TO)", key="ticker")
 monthly_budget_input = st.sidebar.number_input("Monthly Budget (CAD)", min_value=0, key="monthly_budget", step=100)
 min_trade_input = st.sidebar.number_input("Minimum Trade Amount (CAD)", min_value=0, key="min_trade_amount", step=10)
-frequency_input = st.sidebar.selectbox("Recommendation Frequency", ["daily", "weekly", "monthly"], key="recommendation_frequency")
+frequency_input = st.sidebar.selectbox("Investment Frequency", ["daily", "weekly", "monthly"], key="frequency")
 
 if st.sidebar.button("Save Settings"):
     updated_settings = {
         "ticker": st.session_state["ticker"],
         "monthly_budget": st.session_state["monthly_budget"],
         "min_trade_amount": st.session_state["min_trade_amount"],
-        "recommendation_frequency": st.session_state["recommendation_frequency"]
+        "frequency": st.session_state["frequency"]
     }
     save_user_settings(updated_settings)
     st.session_state.update(updated_settings)
     st.sidebar.success("Settings saved!")
 
+# Sidebar for adding existing positions remains the same
 st.sidebar.header("Add Existing Position")
 existing_ticker = st.sidebar.text_input("Ticker (e.g. VSP.TO)", key="existing_ticker")
 existing_date = st.sidebar.date_input("Purchase Date", datetime.now().date())
 existing_price = st.sidebar.number_input("Purchase Price (CAD)", min_value=0.0, step=1.0, format="%.2f", key="existing_price")
 existing_shares = st.sidebar.number_input("Number of Stocks Purchased", min_value=1, step=1, key="existing_shares")
-
 if st.sidebar.button("Add Existing Position"):
     if not existing_ticker.strip():
         st.sidebar.error("Please enter a valid ticker for the existing position.")
@@ -49,6 +51,26 @@ if st.sidebar.button("Add Existing Position"):
         log_investment(existing_price, existing_shares, existing_ticker, date_override=str(existing_date))
         st.sidebar.success(f"Added {existing_shares} share(s) of {existing_ticker} on {existing_date} at ${existing_price:.2f} each.")
 
+# Helper function: Check if an investment has already been made in the current period.
+def already_invested_in_period(freq):
+    df = get_portfolio_df()
+    if df.empty:
+        return False
+    # Normalize dates so we compare date-only
+    df["Date"] = pd.to_datetime(df["Date"]).dt.normalize()
+    today = pd.Timestamp.today().normalize()
+    if freq == "daily":
+        return not df[df["Date"] == today].empty
+    elif freq == "weekly":
+        start_week = today - pd.Timedelta(days=today.weekday())  # Monday of current week
+        return not df[pd.to_datetime(df["Date"]) >= start_week].empty
+    elif freq == "monthly":
+        start_month = today.replace(day=1)
+        return not df[pd.to_datetime(df["Date"]) >= start_month].empty
+    else:
+        return False
+
+# Validate required inputs
 if not st.session_state["ticker"].strip():
     st.error("No ETF ticker selected. Please enter a valid ticker (e.g. VSP.TO).")
     st.stop()
@@ -56,6 +78,7 @@ if st.session_state["monthly_budget"] <= 0:
     st.error("Monthly budget must be greater than zero.")
     st.stop()
 
+# Fetch data for the selected ticker (for recommendations)
 try:
     latest, moving_avg, history = fetch_price_and_trend(st.session_state["ticker"])
 except Exception as e:
@@ -65,10 +88,21 @@ if latest is None:
     st.error("Failed to fetch ETF data. The ticker may be invalid.")
     st.stop()
 
-deviation = (latest - moving_avg) / moving_avg
-percent = calculate_investment_percentage(latest, moving_avg)
-daily_budget = st.session_state["monthly_budget"] / 30
-raw_recommended_amount = daily_budget * percent
+# For demonstration, we still use the "Buy the Dip" strategy.
+# (You can later add dynamic strategy selection.)
+multiplier = dip_strategy(latest, moving_avg)
+
+# Adjust effective budget based on frequency selection.
+if st.session_state["frequency"] == "daily":
+    effective_budget = st.session_state["monthly_budget"] / 30
+elif st.session_state["frequency"] == "weekly":
+    effective_budget = st.session_state["monthly_budget"] / 4
+elif st.session_state["frequency"] == "monthly":
+    effective_budget = st.session_state["monthly_budget"]
+else:
+    effective_budget = st.session_state["monthly_budget"] / 30
+
+raw_recommended_amount = effective_budget * multiplier
 recommended_shares = int(raw_recommended_amount // latest) if latest > 0 else 0
 recommended_investment = recommended_shares * latest if recommended_shares >= 1 else 0
 
@@ -76,17 +110,28 @@ col1, col2 = st.columns([1, 2])
 with col1:
     st.metric("Live Price", f"${latest:.2f}")
     st.metric("7-day Moving Avg", f"${moving_avg:.2f}")
-    st.metric("Deviation", f"{deviation * 100:.2f}%")
+    st.metric("Deviation", f"{(latest - moving_avg)/moving_avg*100:.2f}%")
     st.metric("Recommended Shares", f"{recommended_shares}")
     st.metric("Recommended Investment", f"${recommended_investment:.2f}")
-    if recommended_investment >= st.session_state["min_trade_amount"] and recommended_shares >= 1:
-        if already_invested_today():
-            st.info("You've already invested today.")
-        elif st.button("Simulate Investment"):
+    # Check if a purchase already occurred in the selected period
+    if st.session_state["frequency"] == "daily":
+        already_invested = already_invested_in_period("daily")
+    elif st.session_state["frequency"] == "weekly":
+        already_invested = already_invested_in_period("weekly")
+    elif st.session_state["frequency"] == "monthly":
+        already_invested = already_invested_in_period("monthly")
+    else:
+        already_invested = False
+
+    if already_invested:
+        st.info("Investment already made in the current period.")
+    elif recommended_investment >= st.session_state["min_trade_amount"] and recommended_shares >= 1:
+        if st.button("Simulate Investment"):
             log_investment(latest, recommended_shares, st.session_state["ticker"])
             st.success(f"Simulated purchase: {recommended_shares} share(s) of {st.session_state['ticker']} at ${latest:.2f} each, total ${recommended_investment:.2f}")
     else:
-        st.info("Below minimum trade amount or insufficient funds to purchase a full share. Skipping today.")
+        st.info("Below minimum trade amount or insufficient funds to purchase a full share. Skipping purchase.")
+
 with col2:
     st.subheader(f"{st.session_state['ticker']} Price Over Last 7 Days")
     chart_df = history[['Close']].copy()
@@ -104,8 +149,7 @@ with col2:
 st.subheader("Purchase History")
 df = get_portfolio_df()
 if not df.empty:
-    df["# Stocks"] = df["Shares"]  # 'Shares' column now holds the number purchased
-    st.dataframe(df[["Date", "Price", "# Stocks", "Ticker"]])
+    st.dataframe(df[["Date", "Price", "Shares", "Ticker"]])
 else:
     st.info("No investments logged yet.")
 
@@ -115,10 +159,7 @@ if "Ticker" not in df.columns:
     st.error("Ticker column not found in portfolio data. Please ensure transactions are logged with a ticker.")
     st.stop()
 if not df.empty:
-    grouped = df.groupby("Ticker", as_index=False).agg({
-        "Shares": "sum",
-        "Price": "mean"  # Average purchase price (weighted average would be better; this is a simple version)
-    })
+    grouped = df.groupby("Ticker", as_index=False).agg({"Shares": "sum", "Price": "mean"})
     grouped["Total Cost"] = grouped["Shares"] * grouped["Price"]
     current_prices = {}
     for ticker in grouped["Ticker"].unique():
@@ -157,9 +198,11 @@ if not df.empty:
     value_df = timeline.copy()
     for ticker in tickers:
         try:
-            t_hist = yf.Ticker(ticker).history(start=start_date.strftime("%Y-%m-%d"),
-                                               end=end_date.strftime("%Y-%m-%d"),
-                                               interval="1d")
+            t_hist = yf.Ticker(ticker).history(
+                start=start_date.strftime("%Y-%m-%d"),
+                end=end_date.strftime("%Y-%m-%d"),
+                interval="1d"
+            )
             if not t_hist.empty:
                 t_hist = t_hist.copy()
                 t_hist.index = t_hist.index.tz_localize(None)
