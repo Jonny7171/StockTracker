@@ -8,6 +8,8 @@ This tracker:
 - Displays a live dashboard of your current portfolio value.
 - Supports tracking **multiple stocks**.
 - Lets you log past stock purchases manually (no fractional shares).
+- Supports multiple investing strategies
+- Supports multiple investing frequencies
 
 ---
 
