@@ -1,4 +1,4 @@
-# 📈 Smart Investment Tracker
+# Smart Investment Tracker
 
 A personal finance tool that helps you make smarter, rule-based investments into ETFs or stocks — built with Python and Streamlit.
 
@@ -11,28 +11,28 @@ This tracker:
 
 ---
 
-## 🚀 Features
+## Features
 
-### 💰 Automated Recommendations
+### Automated Recommendations
 - Calculates recommended daily investment based on deviation from 7-day moving average.
 - Ensures purchases follow minimum trade limits and only full shares are bought.
 
-### 📊 Real-Time Dashboard
+### Real-Time Dashboard
 - Live price, moving average, and daily deviation metrics.
 - Chart of recent price history with daily recommendation.
 - Portfolio history and **daily value tracking**.
 
-### 🧾 Portfolio Tracker
+### Portfolio Tracker
 - Tracks total shares, cost basis, current value per stock.
 - Graphs total portfolio value and individual tickers over time.
 
-### ✍️ Manual Entry Support
+### Manual Entry Support
 - Add past transactions (price, date, ticker, # of shares).
 - All transactions are integrated with performance charts and totals.
 
 ---
 
-## ⚙️ Setup
+## Setup
 
 ### 1. Clone the repository
 
