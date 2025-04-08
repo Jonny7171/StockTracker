@@ -1,0 +1,6 @@
+{
+    "ticker": "VSP.TO",
+    "monthly_budget": 2000,
+    "min_trade_amount": 0,
+    "recommendation_frequency": "daily"
+}
